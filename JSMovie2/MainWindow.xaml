@@ -59,7 +59,7 @@
         -->
         <ScrollViewer Name="SCV_REC_Control" Background="Beige"  Margin="0,0,0,0" Grid.Column="1" Grid.Row="2" Grid.RowSpan="2" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Visibility="Hidden" >
             <UniformGrid Name="uniformGrid3" Background="Aqua" Columns="0" Rows="1" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Width="Auto" >
-                <Button x:Name="PB_録画開始" Content="録画開始" Click="PB_録画開始_Click"  Margin="0,0,0,0"   FontSize="24" Height="70" Width="200" />
+                <Button x:Name="PB_録画開始" Content="録画開始" Margin="0,0,0,0" FontSize="24" Height="70" Width="200" />
                 <Label x:Name="LB_タイマー" Content="00:00"  BorderThickness="10" Background="#FF09C592" Width="200"  FontSize="40"   HorizontalContentAlignment="Center" VerticalContentAlignment="Center" MinHeight="83" HorizontalAlignment="Right"/>
             </UniformGrid>
         </ScrollViewer>
@@ -113,7 +113,7 @@
         </ScrollViewer>
 
         <TextBlock Name="TB_CompName"  Text="未接続" TextWrapping="Wrap"  Margin="0,0,0,0.4" HorizontalAlignment="Left" Width="195" FontSize="14"/>
-        <Button Name="PB_Refresh"  Content="Refresh" HorizontalAlignment="Left"  Margin="107,7.6,0,0" Grid.Row="1" VerticalAlignment="Top" Width="75" Click="PB_Refresh_Click"/>
+        <Button Name="PB_Refresh"  Content="Refresh" HorizontalAlignment="Left"  Margin="107,7.6,0,0" Grid.Row="1" VerticalAlignment="Top" Width="75" />
 
     </Grid>
 </Window>
