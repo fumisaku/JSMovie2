@@ -42,7 +42,6 @@ Public Class CameraCapture
     '====== イベント ======
     Public Event CameraError(sender As Object, message As String)
     Public Event CameraStarted(sender As Object, e As EventArgs)
-    Public Event DiagLog(sender As Object, message As String)
 
     '====== コンストラクタ ======
     Public Sub New(cameraIndex As Integer)
@@ -61,20 +60,18 @@ Public Class CameraCapture
             ' ---- バックグラウンドでカメラ初期化 ----
             Dim vcap As VideoCapture = Nothing
 
-            Dim usedBackend As String = ""
             Dim success As Boolean = Await Task.Run(Function()
                 ' DSHOW を最初に試す（MSMFはWindows11でフレームが黒になる既知問題あり）
-                Dim backends() As (api As VideoCaptureAPIs, name As String) = {
-                    (VideoCaptureAPIs.DSHOW, "DSHOW"),
-                    (VideoCaptureAPIs.MSMF, "MSMF"),
-                    (VideoCaptureAPIs.ANY,  "ANY")
+                Dim backends() As VideoCaptureAPIs = {
+                    VideoCaptureAPIs.DSHOW,
+                    VideoCaptureAPIs.MSMF,
+                    VideoCaptureAPIs.ANY
                 }
-                For Each b In backends
+                For Each backend In backends
                     Try
-                        Dim v As New VideoCapture(_cameraIndex, b.api)
+                        Dim v As New VideoCapture(_cameraIndex, backend)
                         Thread.Sleep(800)
                         If v.IsOpened() Then
-                            ' 複数フレーム読んで空でないか確認
                             Dim ok As Boolean = False
                             For i As Integer = 0 To 4
                                 Using testFrame As New Mat()
@@ -87,7 +84,6 @@ Public Class CameraCapture
                             Next
                             If ok Then
                                 vcap = v
-                                usedBackend = b.name
                                 Return True
                             End If
                         End If
@@ -102,8 +98,6 @@ Public Class CameraCapture
                 RaiseEvent CameraError(Me, "カメラ番号 " & _cameraIndex & " をオープンできませんでした。")
                 Return False
             End If
-
-            RaiseEvent DiagLog(Me, $"カメラ接続成功: index={_cameraIndex} backend={usedBackend}")
 
             ' ---- UIスレッドで後処理 ----
             _vcap = vcap
@@ -148,45 +142,18 @@ Public Class CameraCapture
     ''' </summary>
     Private Sub CaptureLoop()
         Dim intervalMs As Integer = CInt(1000.0 / _fps)
-        Dim frameCount As Integer = 0
-        Dim errCount As Integer = 0
-
-        RaiseEvent DiagLog(Me, $"CaptureLoop 開始: fps={_fps} interval={intervalMs}ms")
 
         Do While _isRunning
             Dim sw = System.Diagnostics.Stopwatch.StartNew()
 
             Try
-                If _vcap Is Nothing OrElse Not _vcap.IsOpened() Then
-                    RaiseEvent DiagLog(Me, "vcap が閉じられています。ループ終了。")
-                    Exit Do
-                End If
+                If _vcap Is Nothing OrElse Not _vcap.IsOpened() Then Exit Do
 
                 Using mat As New Mat()
-                    Dim readOk As Boolean = _vcap.Read(mat)
+                    If Not _vcap.Read(mat) OrElse mat.Empty() Then Continue Do
 
-                    ' 最初の5フレームだけ詳細ログ
-                    If frameCount < 5 Then
-                        RaiseEvent DiagLog(Me, $"Frame#{frameCount}: Read={readOk}, Empty={mat.Empty()}, Size={mat.Width}x{mat.Height}, Type={mat.Type()}")
-                    End If
-
-                    If Not readOk OrElse mat.Empty() Then
-                        errCount += 1
-                        If errCount <= 10 Then
-                            RaiseEvent DiagLog(Me, $"Read失敗 #{errCount}: readOk={readOk}, empty={mat.Empty()}")
-                        End If
-                        Continue Do
-                    End If
-
-                    errCount = 0
-                    frameCount += 1
-
-                    ' BGR24 に正規化
                     Dim bgrMat As Mat = ToBgr24(mat)
-                    If bgrMat Is Nothing Then
-                        RaiseEvent DiagLog(Me, "ToBgr24 失敗")
-                        Continue Do
-                    End If
+                    If bgrMat Is Nothing Then Continue Do
 
                     Dim fw As Integer = bgrMat.Width
                     Dim fh As Integer = bgrMat.Height
@@ -196,7 +163,6 @@ Public Class CameraCapture
 
                     If Not Object.ReferenceEquals(bgrMat, mat) Then bgrMat.Dispose()
 
-                    ' 録画中は ffmpeg に書き込む
                     If _isRecording AndAlso _ffmpegStream IsNot Nothing Then
                         Try
                             _ffmpegStream.Write(frameData, 0, frameData.Length)
@@ -204,7 +170,6 @@ Public Class CameraCapture
                         End Try
                     End If
 
-                    ' UIスレッドで WriteableBitmap に書き込む
                     _dispatcher.Invoke(
                         Sub()
                             If Not _isRunning Then Exit Sub
@@ -218,24 +183,19 @@ Public Class CameraCapture
                                 End If
                                 _writeableBitmap.WritePixels(
                                     New Int32Rect(0, 0, fw, fh), frameData, stride, 0)
-                            Catch ex As Exception
-                                RaiseEvent DiagLog(Me, $"WritePixels例外: {ex.Message}")
+                            Catch
                             End Try
                         End Sub,
                         DispatcherPriority.Render)
                 End Using
 
-            Catch ex As Exception
-                RaiseEvent DiagLog(Me, $"CaptureLoop例外: {ex.Message}")
+            Catch
             End Try
 
-            ' FPS制御
             sw.Stop()
             Dim remaining As Integer = intervalMs - CInt(sw.ElapsedMilliseconds)
             If remaining > 1 Then Thread.Sleep(remaining)
         Loop
-
-        RaiseEvent DiagLog(Me, $"CaptureLoop 終了: frameCount={frameCount}")
     End Sub
 
     ''' <summary>MatをBGR24(CV_8UC3)に変換して返す。変換不要な場合は同じ参照を返す。</summary>

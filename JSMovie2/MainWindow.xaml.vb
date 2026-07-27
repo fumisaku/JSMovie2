@@ -164,15 +164,6 @@ Class MainWindow
         _log.LogAdd("カメラエラー: " & message, _log.ERR)
     End Sub
 
-    ' 診断ログ: ヘッダーラベルに表示してリアルタイム確認できるようにする
-    Private Sub Camera_DiagLog(sender As Object, message As String) Handles _camera.DiagLog
-        _log.LogAdd("[DIAG] " & message, _log.ERR)
-        ' 最初の数件はヘッダーにも表示する
-        Dispatcher.InvokeAsync(Sub()
-                                   Me.LB_Hedder.Content = message
-                               End Sub)
-    End Sub
-
     '======================================================
     '   録画関連
     '======================================================
