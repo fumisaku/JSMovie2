@@ -1,0 +1,157 @@
+﻿<?xml version="1.0"?>
+<doc>
+<assembly>
+<name>
+JSMovie2
+</name>
+</assembly>
+<members>
+<member name="T:JSMovie2.CameraCapture">
+ <summary>
+ カメラキャプチャエンジン
+ OpenCvSharpを使わず、DirectShow.NETとWriteableBitmapを使用することで
+ Windows 11でも安定動作するカメラキャプチャを実現する。
+
+ アーキテクチャ:
+   DirectShow → SampleGrabber → コールバック → WriteableBitmap → WPF表示
+   同時に生フレームをバッファし、ffmpegで録画ファイルを生成する。
+
+ 録画方式:
+   フレームをJPEGにエンコードしてffmpegにパイプ入力し、mp4として出力する。
+   これによりOpenCVのVideoWriterへの依存をゼロにする。
+ </summary>
+</member>
+<member name="M:JSMovie2.CameraCapture.GetCameraDevices">
+ <summary>カメラデバイス一覧を取得する（固定3件を返す）</summary>
+</member>
+<member name="M:JSMovie2.CameraCapture.Start(System.Windows.Controls.Image)">
+ <summary>カメラを開始する</summary>
+</member>
+<member name="M:JSMovie2.CameraCapture.OnCaptureTick(System.Object,System.EventArgs)">
+ <summary>フレーム取得タイマーのコールバック</summary>
+</member>
+<member name="M:JSMovie2.CameraCapture.StartRecording(System.String)">
+ <summary>録画開始 (ffmpegへのパイプ入力)</summary>
+</member>
+<member name="M:JSMovie2.CameraCapture.StopRecording">
+ <summary>録画停止</summary>
+</member>
+<member name="M:JSMovie2.CameraCapture.Stop">
+ <summary>カメラを停止する</summary>
+</member>
+<member name="T:JSMovie2.FrameReceivedEventArgs">
+ <summary>フレーム受信イベントの引数</summary>
+</member>
+<member name="T:JSMovie2.MFCameraDevice">
+ <summary>
+ Media Foundation経由でカメラフレームを取得するラッパークラス
+ Win32 API (Video for Windows / MF) を使い、ネイティブDLLに依存しない実装。
+ ここでは Media Foundation の IMFSourceReader を P/Invoke で使用する。
+ </summary>
+</member>
+<member name="M:JSMovie2.MFCameraDevice.GrabFrame">
+ <summary>1フレームをBGR24形式のバイト配列で取得</summary>
+</member>
+<member name="T:JSMovie2.VideoMerger">
+ <summary>
+ FFMpegCoreを使った動画・音声合成モジュール
+ OpenCVのVideoWriterへの依存をゼロにし、ffmpeg.exeをPure Managed方式で制御する。
+
+ 動作:
+   1. カメラ映像フレームをffmpegにパイプ → 映像のみのmp4を生成
+   2. NAudioで録音したwavファイルと映像mp4をffmpegで合成 → 最終mp4を生成
+   3. 一時ファイルは合成後に削除
+
+ FFMpegCoreの利点:
+   - NuGetで管理されるためDLLの手動配置不要
+   - ffmpeg.exeはアプリと同じフォルダに配置（またはFFMpeg.Downloaderで自動取得）
+   - .NET Framework 4.8 でも動作
+ </summary>
+</member>
+<member name="M:JSMovie2.VideoMerger.Initialize">
+ <summary>
+ ffmpeg.exe のパスを初期化する。
+ アプリケーションの実行フォルダを最初に探し、なければPATH環境変数を探す。
+ </summary>
+</member>
+<member name="P:JSMovie2.VideoMerger.IsAvailable">
+ <summary>ffmpeg.exe が使用可能かどうか</summary>
+</member>
+<member name="P:JSMovie2.VideoMerger.FfmpegPath">
+ <summary>ffmpeg.exe のパスを返す</summary>
+</member>
+<member name="M:JSMovie2.VideoMerger.MergeVideoAudio(System.String,System.String,System.String)">
+ <summary>
+ 映像ファイルと音声ファイルを合成して最終ファイルを生成する。
+ ffmpegに「-c:v copy」を使うため、再エンコードなしで高速に合成できる。
+ </summary>
+ <param name="videoFile">映像のみのmp4ファイルパス</param>
+ <param name="audioFile">音声wavファイルパス</param>
+ <param name="outputFile">出力mp4ファイルパス</param>
+ <returns>成功したらTrue</returns>
+</member>
+<member name="M:JSMovie2.VideoMerger.CopyVideoOnly(System.String,System.String)">
+ <summary>
+ 映像ファイルのみで出力する（音声なし）。
+ 音声録音に失敗した場合のフォールバック。
+ </summary>
+</member>
+<member name="M:JSMovie2.VideoMerger.MergeVideoAudioAsync(System.String,System.String,System.String)">
+ <summary>ffmpegを非同期で実行し完了を待つ</summary>
+</member>
+<member name="M:JSMovie2.VideoMerger.RunFfmpeg(System.String,System.Int32)">
+ <summary>ffmpegプロセスを同期実行する（内部ヘルパー）</summary>
+</member>
+<member name="M:JSMovie2.VideoMerger.DeleteTempFile(System.String)">
+ <summary>
+ 一時ファイルを安全に削除する。
+ ffmpegプロセスが完全に終了してから削除を試みる。
+ </summary>
+</member>
+<member name="T:JSMovie2.カメラ選択">
+<summary>
+カメラ選択
+</summary>
+</member>
+<member name="M:JSMovie2.カメラ選択.InitializeComponent">
+<summary>
+InitializeComponent
+</summary>
+</member>
+<member name="T:JSMovie2.起動中画面">
+<summary>
+起動中画面
+</summary>
+</member>
+<member name="M:JSMovie2.起動中画面.InitializeComponent">
+<summary>
+InitializeComponent
+</summary>
+</member>
+<member name="T:JSMovie2.Application">
+<summary>
+Application
+</summary>
+</member>
+<member name="M:JSMovie2.Application.InitializeComponent">
+<summary>
+InitializeComponent
+</summary>
+</member>
+<member name="M:JSMovie2.Application.Main">
+<summary>
+Application Entry Point.
+</summary>
+</member>
+<member name="T:JSMovie2.MainWindow">
+<summary>
+MainWindow
+</summary>
+</member>
+<member name="M:JSMovie2.MainWindow.InitializeComponent">
+<summary>
+InitializeComponent
+</summary>
+</member>
+</members>
+</doc>

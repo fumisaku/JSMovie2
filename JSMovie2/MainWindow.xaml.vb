@@ -1,12 +1,14 @@
 Imports System.IO
+Imports System.Windows
+Imports System.Windows.Controls
 Imports System.Windows.Controls.Primitives
+Imports System.Windows.Input
 Imports System.Windows.Threading
 Imports System.Windows.Media
 Imports System.Threading.Tasks
 Imports System.Collections.ObjectModel
 
-' 音声部分
-Imports NAudio.CoreAudioApi
+' 音声部分 (NAudio 2.x - WaveInEvent は NAudio.Wave 名前空間)
 Imports NAudio.Wave
 
 Class MainWindow
@@ -231,7 +233,7 @@ Class MainWindow
 
         Task.Run(Sub()
                      Try
-                         Threading.Thread.Sleep(1000) ' ファイルが完全に書き込まれるまで待機
+                         System.Threading.Thread.Sleep(1000) ' ファイルが完全に書き込まれるまで待機
 
                          If File.Exists(audioPath) AndAlso File.Exists(videoPath) Then
                              VideoMerger.MergeVideoAudio(videoPath, audioPath, outputPath)
@@ -515,7 +517,7 @@ Class MainWindow
 
                 If fd Is Nothing Then
                     ReDim Preserve 表示ファイル一覧(表示ファイル数 + 1)
-                    表示ファイル一覧(表示ファイル数 + 1) = New F_Index.FD_ファイル詳細With {.ファイル名 = Path.GetFileName(file)}
+                    表示ファイル一覧(表示ファイル数 + 1) = New F_Index.FD_ファイル詳細 With {.ファイル名 = Path.GetFileName(file)}
                     表示ファイル数 += 1
                 Else
                     Dim match As Boolean = True

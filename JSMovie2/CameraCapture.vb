@@ -3,48 +3,38 @@ Imports System.Windows
 Imports System.Windows.Media
 Imports System.Windows.Media.Imaging
 Imports System.Windows.Threading
+Imports OpenCvSharp
+Imports OpenCvSharp.Extensions
 
 ''' <summary>
 ''' カメラキャプチャエンジン
-''' OpenCvSharpを使わず、DirectShow.NETとWriteableBitmapを使用することで
-''' Windows 11でも安定動作するカメラキャプチャを実現する。
-'''
-''' アーキテクチャ:
-'''   DirectShow → SampleGrabber → コールバック → WriteableBitmap → WPF表示
-'''   同時に生フレームをバッファし、ffmpegで録画ファイルを生成する。
-'''
-''' 録画方式:
-'''   フレームをJPEGにエンコードしてffmpegにパイプ入力し、mp4として出力する。
-'''   これによりOpenCVのVideoWriterへの依存をゼロにする。
+''' OpenCvSharp4 (4.10.x) を使用。旧版(4.5.5)と異なり Windows 11 で動作する。
+''' 映像表示: WriteableBitmap (WPF 直接描画、GDI 不使用)
+''' 映像録画: ffmpeg.exe にフレームをパイプ入力 (VideoWriter 不使用)
 ''' </summary>
 Public Class CameraCapture
     Implements IDisposable
 
-    '====== COM定義 (DirectShow / MediaFoundation) ======
-    ' Windows標準のMedia Foundationを使ったシンプルな実装
-    ' 実際のカメラアクセスは Win32 API 経由
-
     '====== パラメータ ======
     Private _cameraIndex As Integer
-    Private _frameWidth As Integer = 1280
-    Private _frameHeight As Integer = 720
+    Private _frameWidth As Integer = 1440
+    Private _frameHeight As Integer = 810
     Private _fps As Integer = 30
     Private _isRunning As Boolean = False
     Private _isRecording As Boolean = False
 
     Private _captureTimer As DispatcherTimer
     Private _writeableBitmap As WriteableBitmap
+    Private _frameImage As System.Windows.Controls.Image  ' 表示先
 
-    ' 録画用
+    ' OpenCvSharp
+    Private _vcap As VideoCapture
+
+    ' ffmpeg パイプ録画
     Private _ffmpegProcess As System.Diagnostics.Process
     Private _ffmpegStream As System.IO.Stream
-    Private _recordingPath As String
-
-    ' カメラデバイス (WIA / MF経由)
-    Private _videoCaptureDevice As MFCameraDevice
 
     '====== イベント ======
-    Public Event FrameReceived(sender As Object, e As FrameReceivedEventArgs)
     Public Event CameraError(sender As Object, message As String)
 
     '====== コンストラクタ ======
@@ -52,104 +42,123 @@ Public Class CameraCapture
         _cameraIndex = cameraIndex
     End Sub
 
-    ''' <summary>カメラデバイス一覧を取得する</summary>
-    Public Shared Function GetCameraDevices() As List(Of String)
-        Dim result As New List(Of String)()
-        Try
-            ' WMI経由でカメラデバイスを列挙 (DirectShow不要、Windows標準)
-            Dim searcher As New System.Management.ManagementObjectSearcher(
-                "SELECT * FROM Win32_PnPEntity WHERE PNPClass = 'Camera' OR PNPClass = 'Image'")
-            For Each mo As System.Management.ManagementObject In searcher.Get()
-                Dim name As String = mo("Name")?.ToString()
-                If name IsNot Nothing Then result.Add(name)
-            Next
-        Catch
-            ' WMIが使えない場合はデフォルト名を返す
-            result.Add("カメラ 0")
-            result.Add("カメラ 1")
-            result.Add("カメラ 2")
-        End Try
-        Return result
-    End Function
-
-    ''' <summary>カメラを開始する</summary>
+    ''' <summary>カメラを開始しWPF Imageコントロールに表示する</summary>
     Public Function Start(frameBuffer As System.Windows.Controls.Image) As Boolean
+        _frameImage = frameBuffer
         Try
-            _videoCaptureDevice = New MFCameraDevice(_cameraIndex, _frameWidth, _frameHeight, _fps)
-            If Not _videoCaptureDevice.Open() Then
+            ' バックエンドを順に試行: MSMF → DSHOW → ANY
+            Dim backends() As VideoCaptureAPIs = {
+                VideoCaptureAPIs.MSMF,
+                VideoCaptureAPIs.DSHOW,
+                VideoCaptureAPIs.ANY
+            }
+
+            For Each backend In backends
+                Try
+                    _vcap = New VideoCapture(_cameraIndex, backend)
+                    System.Threading.Thread.Sleep(500)
+                    If _vcap.IsOpened() Then
+                        ' 実際にフレームが読めるか確認
+                        Using testFrame As New Mat()
+                            If _vcap.Read(testFrame) AndAlso Not testFrame.Empty() Then
+                                Exit For  ' 成功
+                            End If
+                        End Using
+                    End If
+                    _vcap.Dispose()
+                    _vcap = Nothing
+                Catch
+                    If _vcap IsNot Nothing Then _vcap.Dispose() : _vcap = Nothing
+                End Try
+            Next
+
+            If _vcap Is Nothing OrElse Not _vcap.IsOpened() Then
                 RaiseEvent CameraError(Me, "カメラ番号 " & _cameraIndex & " をオープンできませんでした。")
                 Return False
             End If
 
-            ' WriteableBitmapを初期化 (WPF表示用)
-            _writeableBitmap = New WriteableBitmap(_frameWidth, _frameHeight, 96, 96, PixelFormats.Bgr24, Nothing)
-            frameBuffer.Source = _writeableBitmap
+            ' 解像度・FPS 設定
+            _vcap.Set(VideoCaptureProperties.FrameWidth, _frameWidth)
+            _vcap.Set(VideoCaptureProperties.FrameHeight, _frameHeight)
+            _vcap.Set(VideoCaptureProperties.Fps, _fps)
 
-            ' フレーム取得タイマー
+            ' 実際に取得できた解像度を反映
+            _frameWidth = CInt(_vcap.Get(VideoCaptureProperties.FrameWidth))
+            _frameHeight = CInt(_vcap.Get(VideoCaptureProperties.FrameHeight))
+            Dim actualFps As Double = _vcap.Get(VideoCaptureProperties.Fps)
+            If actualFps > 0 Then _fps = CInt(actualFps)
+
+            ' WriteableBitmap 初期化
+            _writeableBitmap = New WriteableBitmap(
+                _frameWidth, _frameHeight, 96, 96, PixelFormats.Bgr24, Nothing)
+            _frameImage.Source = _writeableBitmap
+
+            ' 取得タイマー開始
             _captureTimer = New DispatcherTimer()
             _captureTimer.Interval = TimeSpan.FromMilliseconds(1000.0 / _fps)
             AddHandler _captureTimer.Tick, AddressOf OnCaptureTick
             _captureTimer.Start()
             _isRunning = True
             Return True
+
         Catch ex As Exception
             RaiseEvent CameraError(Me, "カメラ起動エラー: " & ex.Message)
             Return False
         End Try
     End Function
 
-    ''' <summary>フレーム取得タイマーのコールバック</summary>
+    ''' <summary>フレーム取得タイマーのコールバック (UIスレッドで実行)</summary>
     Private Sub OnCaptureTick(sender As Object, e As EventArgs)
-        If Not _isRunning OrElse _videoCaptureDevice Is Nothing Then Exit Sub
+        If Not _isRunning OrElse _vcap Is Nothing OrElse Not _vcap.IsOpened() Then Exit Sub
 
         Try
-            Dim frameData() As Byte = _videoCaptureDevice.GrabFrame()
-            If frameData Is Nothing OrElse frameData.Length = 0 Then Exit Sub
+            Using mat As New Mat()
+                If Not _vcap.Read(mat) OrElse mat.Empty() Then Exit Sub
 
-            ' WriteableBitmapに書き込む
-            _writeableBitmap.Lock()
-            Try
-                Dim stride As Integer = _frameWidth * 3
-                _writeableBitmap.WritePixels(
-                    New Int32Rect(0, 0, _frameWidth, _frameHeight),
-                    frameData, stride, 0)
-            Finally
-                _writeableBitmap.Unlock()
-            End Try
+                ' BGR24 バイト配列に変換
+                Dim stride As Integer = mat.Width * 3
+                Dim frameData(mat.Width * mat.Height * 3 - 1) As Byte
+                Marshal.Copy(mat.Data, frameData, 0, frameData.Length)
 
-            ' 録画中の場合はffmpegにフレームを送る
-            If _isRecording AndAlso _ffmpegStream IsNot Nothing Then
+                ' WriteableBitmap に書き込む (GDI 不使用)
+                _writeableBitmap.Lock()
                 Try
-                    _ffmpegStream.Write(frameData, 0, frameData.Length)
-                Catch
+                    _writeableBitmap.WritePixels(
+                        New Int32Rect(0, 0, mat.Width, mat.Height),
+                        frameData, stride, 0)
+                    _writeableBitmap.AddDirtyRect(New Int32Rect(0, 0, mat.Width, mat.Height))
+                Finally
+                    _writeableBitmap.Unlock()
                 End Try
-            End If
 
-            RaiseEvent FrameReceived(Me, New FrameReceivedEventArgs(frameData, _frameWidth, _frameHeight))
-        Catch ex As Exception
+                ' 録画中は ffmpeg にフレームを送る
+                If _isRecording AndAlso _ffmpegStream IsNot Nothing Then
+                    Try
+                        _ffmpegStream.Write(frameData, 0, frameData.Length)
+                    Catch
+                    End Try
+                End If
+            End Using
+        Catch
             ' フレーム取得エラーは無視して続行
         End Try
     End Sub
 
-    ''' <summary>録画開始 (ffmpegへのパイプ入力)</summary>
+    ''' <summary>ffmpeg パイプ入力で録画開始</summary>
     Public Function StartRecording(outputVideoPath As String) As Boolean
         If _isRecording Then Return False
-        _recordingPath = outputVideoPath
+
+        Dim ffmpegExe As String = System.IO.Path.Combine(
+            AppDomain.CurrentDomain.BaseDirectory, "ffmpeg.exe")
+        If Not System.IO.File.Exists(ffmpegExe) Then
+            RaiseEvent CameraError(Me, "ffmpeg.exe が見つかりません: " & ffmpegExe)
+            Return False
+        End If
 
         Try
-            ' ffmpegのパスを実行ファイルと同じフォルダから取得
-            Dim ffmpegExe As String = System.IO.Path.Combine(
-                AppDomain.CurrentDomain.BaseDirectory, "ffmpeg.exe")
-
-            If Not System.IO.File.Exists(ffmpegExe) Then
-                RaiseEvent CameraError(Me, "ffmpeg.exe が見つかりません: " & ffmpegExe)
-                Return False
-            End If
-
-            ' ffmpegをパイプ入力モードで起動
-            ' rawvideo形式でBGR24を入力し、mp4(H.264)として出力
             Dim args As String = String.Format(
-                "-y -f rawvideo -pix_fmt bgr24 -s {0}x{1} -r {2} -i pipe:0 -c:v libx264 -preset fast -crf 23 ""{3}""",
+                "-y -f rawvideo -pix_fmt bgr24 -s {0}x{1} -r {2} -i pipe:0 " &
+                "-c:v libx264 -preset fast -crf 23 ""{3}""",
                 _frameWidth, _frameHeight, _fps, outputVideoPath)
 
             Dim psi As New System.Diagnostics.ProcessStartInfo(ffmpegExe, args)
@@ -172,34 +181,28 @@ Public Class CameraCapture
     Public Sub StopRecording()
         If Not _isRecording Then Exit Sub
         _isRecording = False
-
         Try
-            If _ffmpegStream IsNot Nothing Then
-                _ffmpegStream.Flush()
-                _ffmpegStream.Close()
-                _ffmpegStream = Nothing
-            End If
+            _ffmpegStream?.Flush()
+            _ffmpegStream?.Close()
+            _ffmpegStream = Nothing
             If _ffmpegProcess IsNot Nothing AndAlso Not _ffmpegProcess.HasExited Then
                 _ffmpegProcess.WaitForExit(10000)
-                _ffmpegProcess.Dispose()
-                _ffmpegProcess = Nothing
             End If
+            _ffmpegProcess?.Dispose()
+            _ffmpegProcess = Nothing
         Catch
         End Try
     End Sub
 
-    ''' <summary>カメラを停止する</summary>
+    ''' <summary>カメラ停止</summary>
     Public Sub [Stop]()
         _isRunning = False
-        If _captureTimer IsNot Nothing Then
-            _captureTimer.Stop()
-            _captureTimer = Nothing
-        End If
+        _captureTimer?.Stop()
+        _captureTimer = Nothing
         StopRecording()
-        If _videoCaptureDevice IsNot Nothing Then
-            _videoCaptureDevice.Dispose()
-            _videoCaptureDevice = Nothing
-        End If
+        _vcap?.Release()
+        _vcap?.Dispose()
+        _vcap = Nothing
     End Sub
 
     Public Property FrameWidth As Integer
@@ -241,117 +244,15 @@ Public Class CameraCapture
 
 End Class
 
-''' <summary>フレーム受信イベントの引数</summary>
+''' <summary>フレーム受信イベント引数</summary>
 Public Class FrameReceivedEventArgs
     Inherits EventArgs
-
     Public ReadOnly Property FrameData() As Byte()
     Public ReadOnly Property Width As Integer
     Public ReadOnly Property Height As Integer
-
     Public Sub New(data() As Byte, w As Integer, h As Integer)
         FrameData = data
         Width = w
         Height = h
-    End Sub
-End Class
-
-''' <summary>
-''' Media Foundation経由でカメラフレームを取得するラッパークラス
-''' Win32 API (Video for Windows / MF) を使い、ネイティブDLLに依存しない実装。
-''' ここでは Media Foundation の IMFSourceReader を P/Invoke で使用する。
-''' </summary>
-Friend Class MFCameraDevice
-    Implements IDisposable
-
-    Private _cameraIndex As Integer
-    Private _width As Integer
-    Private _height As Integer
-    Private _fps As Integer
-    Private _sourceReader As IntPtr = IntPtr.Zero
-    Private _isOpen As Boolean = False
-    Private _stride As Integer
-
-    ' Media Foundation の GUIDs
-    Private Shared ReadOnly MF_MEDIA_TYPE_VIDEO As New Guid("73646976-0000-0010-8000-00AA00389B71")
-    Private Shared ReadOnly MFVideoFormat_RGB24 As New Guid("e436eb7d-524f-11ce-9f53-0020af0ba770")
-    Private Shared ReadOnly MFVideoFormat_NV12 As New Guid("3231564E-0000-0010-8000-00AA00389B71")
-
-    ' IMFSourceReader メソッドのインデックス
-    Private Const MF_SOURCE_READER_FIRST_VIDEO_STREAM As Integer = &HFFFFFFFC
-
-    ' Media Foundation の初期化フラグ
-    Private Const MFSTARTUP_NOSOCKET As Integer = &H1
-
-    <DllImport("mf.dll")>
-    Private Shared Function MFStartup(version As Integer, dwFlags As Integer) As Integer
-    End Function
-
-    <DllImport("mf.dll")>
-    Private Shared Function MFShutdown() As Integer
-    End Function
-
-    <DllImport("mfreadwrite.dll")>
-    Private Shared Function MFCreateSourceReaderFromURL(
-        <MarshalAs(UnmanagedType.LPWStr)> pwszURL As String,
-        pAttributes As IntPtr,
-        ByRef ppSourceReader As IntPtr) As Integer
-    End Function
-
-    <DllImport("mfreadwrite.dll")>
-    Private Shared Function MFCreateDeviceSourceFromAttributes(
-        pAttributes As IntPtr,
-        ByRef ppMediaSource As IntPtr) As Integer
-    End Function
-
-    Sub New(cameraIndex As Integer, width As Integer, height As Integer, fps As Integer)
-        _cameraIndex = cameraIndex
-        _width = width
-        _height = height
-        _fps = fps
-        _stride = width * 3
-    End Sub
-
-    Public Function Open() As Boolean
-        Try
-            ' MFを初期化
-            MFStartup(&H20070, MFSTARTUP_NOSOCKET)
-            _isOpen = True
-            Return True
-        Catch
-            ' Media Foundationが使えない場合はOpenCVなしでダミーフレームを返すモードで続行
-            _isOpen = True  ' ダミーモード
-            Return True
-        End Try
-    End Function
-
-    ''' <summary>1フレームをBGR24形式のバイト配列で取得</summary>
-    Public Function GrabFrame() As Byte()
-        ' Media Foundation の完全な P/Invoke 実装は複雑なため、
-        ' ここではカメラデバイスへのアクセスに VideoCapture クラスを使わず
-        ' Windows.Media.Devices 名前空間を使った実装の骨格を提供する。
-        '
-        ' 実際の運用では以下の選択肢がある:
-        '   1. OpenCvSharp4 の最新版 (4.10.x) を使う → NuGetで更新するだけ
-        '   2. DirectShowLib-2005 の NuGet パッケージを使う
-        '   3. AForge.NET の VideoCaptureDevice を使う
-        '
-        ' 現時点では OpenCvSharp 4.10.x が最も実績があるため、
-        ' VideoMerger.vb と組み合わせてアプローチBを実現する。
-        '
-        ' このクラスは将来の Pure P/Invoke 実装への移行パスを示している。
-
-        ' ダミーフレーム (黒画面) を返す
-        Return New Byte(_width * _height * 3 - 1) {}
-    End Function
-
-    Public Sub Dispose() Implements IDisposable.Dispose
-        Try
-            If _isOpen Then
-                MFShutdown()
-                _isOpen = False
-            End If
-        Catch
-        End Try
     End Sub
 End Class

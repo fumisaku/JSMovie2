@@ -32,7 +32,7 @@ Public Class VideoMerger
         End If
 
         ' 2. PATH環境変数を検索
-        Dim pathEnv As String = Environment.GetEnvironmentVariable("PATH") ?? ""
+        Dim pathEnv As String = If(Environment.GetEnvironmentVariable("PATH"), "")
         For Each dir As String In pathEnv.Split(";")
             Dim candidate As String = Path.Combine(dir.Trim(), "ffmpeg.exe")
             If File.Exists(candidate) Then

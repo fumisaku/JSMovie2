@@ -1,4 +1,5 @@
 Imports System.Threading
+Imports System.Windows
 Imports System.Windows.Threading
 
 Public Class 通信Main_C
@@ -73,7 +74,7 @@ Public Class 通信Main_C
     Private Sub Timer_sendTimeout_Tick(sender As Object, e As EventArgs)
         TimeoutFlag = True
         Timer_sendTimeout.Stop()
-        MessageBox.Show("タイムアウトしました", "タイムアウト", MessageBoxButton.OK, MessageBoxImage.Warning)
+        System.Windows.MessageBox.Show("タイムアウトしました", "タイムアウト", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning)
     End Sub
 
     Private Sub server_ReceivedData(ByVal sender As Object, ByVal e As ReceivedDataEventArgs) Handles TCPClientInst.ReceivedData
