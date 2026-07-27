@@ -1,0 +1,15 @@
+<Window x:Class="起動中画面"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="起動中" Height="150" Width="300"
+        WindowStyle="None"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        Background="#FF1E1E1E">
+    <Grid>
+        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+            <TextBlock Text="カメラを初期化しています..." Foreground="White" FontSize="14" HorizontalAlignment="Center"/>
+            <ProgressBar IsIndeterminate="True" Height="20" Width="200" Margin="0,15,0,0"/>
+        </StackPanel>
+    </Grid>
+</Window>

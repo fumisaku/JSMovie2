@@ -1,0 +1,14 @@
+[GM_IPAddress]
+127.0.0.1
+
+[GM_Port]
+8080
+
+[端末名]
+端末1
+
+[カメラ番号]
+0
+
+[VideoPath]
+.\Data
