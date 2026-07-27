@@ -16,7 +16,7 @@ Public Class F_Index
     Public Function 登録(データ As FD_ファイル詳細) As Integer
         Dim rc As Integer = 0
         Try
-            Dim sw As New System.IO.StreamWriter(System.IO.Path.Combine(filepath, Filename), False, System.Text.Encoding.Default)
+            Dim sw As New System.IO.StreamWriter(System.IO.Path.Combine(filepath, Filename), False, System.Text.Encoding.UTF8)
             sw.WriteLine("FileName,区分No,区分名,ラウンドNo,ラウンド名,種目No,種目名,Heat,選手名,連番")
 
             Dim 登録済みFLAG As Boolean = False
@@ -49,14 +49,29 @@ Public Class F_Index
         Dim fullpath As String = System.IO.Path.Combine(filepath, Filename)
         If Not System.IO.File.Exists(fullpath) Then Exit Sub
 
-        Dim cReader As New System.IO.StreamReader(fullpath, System.Text.Encoding.Default)
+        ' detectEncodingFromByteOrderMarks=True でBOMがあればUTF-8、なければShift-JISにフォールバック
+        Dim cReader As New System.IO.StreamReader(fullpath, System.Text.Encoding.GetEncoding("shift_jis"), True)
+        Dim lines As New System.Collections.Generic.List(Of String)
         While cReader.Peek() >= 0
-            Dim stBuffer As String = cReader.ReadLine()
+            lines.Add(cReader.ReadLine())
+        End While
+        cReader.Close()
+
+        ' UTF-8で書き直す（次回以降はUTF-8で読める）
+        Try
+            Dim sw As New System.IO.StreamWriter(fullpath, False, System.Text.Encoding.UTF8)
+            For Each line In lines
+                sw.WriteLine(line)
+            Next
+            sw.Close()
+        Catch
+        End Try
+
+        For Each stBuffer In lines
             If Not stBuffer.StartsWith("FileName") Then
                 Addデータ(stBuffer)
             End If
-        End While
-        cReader.Close()
+        Next
     End Sub
 
     Private Function カンマ区切り(fd As FD_ファイル詳細) As String

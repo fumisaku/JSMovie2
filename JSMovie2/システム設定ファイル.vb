@@ -27,7 +27,7 @@ Public Class システム設定ファイル
         If Not File.Exists(fullpath) Then Exit Sub
 
         Using stream As New FileStream(fullpath, FileMode.Open, FileAccess.Read)
-            Dim cReader As New StreamReader(stream, System.Text.Encoding.Default)
+            Dim cReader As New StreamReader(stream, System.Text.Encoding.UTF8)
             Dim stResult() As String = Split(cReader.ReadToEnd(), vbCrLf)
             Dim 行数 As Integer = stResult.Length - 1
             cReader.Close()
