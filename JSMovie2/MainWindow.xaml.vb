@@ -601,9 +601,11 @@ Class MainWindow
         End While
     End Sub
 
-    Private Sub FileBtn_Click(sender As Button, e As EventArgs)
-        動画再生(sender.Tag)
-        SEND_REQBMLIST(sender.Tag)
+    Private Sub FileBtn_Click(sender As Object, e As RoutedEventArgs)
+        Dim btn = DirectCast(sender, Button)
+        Dim path As String = CStr(btn.Tag)
+        動画再生(path)
+        SEND_REQBMLIST(path)
     End Sub
 
     '======================================================
@@ -670,7 +672,14 @@ Class MainWindow
         Me.LB_Hedder.Content = "再生中 " & Path.GetFileName(_videoPath)
 
         If Not _pauseFlag Then
-            MediaElementMovie.Source = New Uri(_videoPath, UriKind.RelativeOrAbsolute)
+            ' 絶対パスで Uri を生成（UriKind.Absolute で確実に）
+            Dim uri As Uri
+            If System.IO.Path.IsPathRooted(_videoPath) Then
+                uri = New Uri(_videoPath, UriKind.Absolute)
+            Else
+                uri = New Uri(System.IO.Path.GetFullPath(_videoPath), UriKind.Absolute)
+            End If
+            MediaElementMovie.Source = uri
             画面サイズを元サイズにする()
         End If
 
@@ -678,11 +687,11 @@ Class MainWindow
         MediaElementMovie.Play()
     End Sub
 
-    Private Sub ButtonPlay_Click(sender As Object, e As EventArgs)
+    Private Sub ButtonPlay_Click(sender As Object, e As RoutedEventArgs)
         動画再生スタート()
     End Sub
 
-    Private Sub ButtonPause_Click(sender As Object, e As EventArgs)
+    Private Sub ButtonPause_Click(sender As Object, e As RoutedEventArgs)
         _timer再生.Stop()
         MediaElementMovie.Pause()
         _pauseFlag = True
