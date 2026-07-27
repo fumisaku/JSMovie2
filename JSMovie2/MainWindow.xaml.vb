@@ -98,7 +98,7 @@ Class MainWindow
         End If
     End Sub
 
-    Private Sub ContentRenderedEvent(sender As Object, e As EventArgs) Handles Me.ContentRendered
+    Private Async Sub ContentRenderedEvent(sender As Object, e As EventArgs) Handles Me.ContentRendered
         画面切り替え("R")
 
         ' カメラ選択ダイアログ
@@ -114,8 +114,8 @@ Class MainWindow
         Dim result As Boolean? = 選択画面.ShowDialog()
         _カメラ番号 = 選択画面.SelectedCameraIndex
 
-        ' カメラ起動
-        カメラ起動()
+        ' カメラ起動（非同期）
+        Await カメラ起動Async()
 
         再生リスト更新()
     End Sub
@@ -124,17 +124,23 @@ Class MainWindow
     '   カメラ関連 (新実装 - OpenCvSharp不使用)
     '======================================================
 
-    Private Sub カメラ起動()
+    Private Async Function カメラ起動Async() As Task
         Try
             Dim 起動画面 As New 起動中画面()
             起動画面.Show()
+
+            If _camera IsNot Nothing Then
+                _camera.Dispose()
+                _camera = Nothing
+            End If
 
             _camera = New CameraCapture(_カメラ番号)
             _camera.FrameWidth = 1440
             _camera.FrameHeight = 810
             _camera.Fps = 30
 
-            Dim success As Boolean = _camera.Start(Img_Screen)
+            ' 非同期でカメラ起動（UIスレッドをブロックしない）
+            Dim success As Boolean = Await _camera.StartAsync(Img_Screen)
 
             起動画面.Hide()
             起動画面.Close()
@@ -152,7 +158,7 @@ Class MainWindow
         Catch ex As Exception
             MessageBox.Show("カメラ起動エラー: " & ex.Message, "エラー", MessageBoxButton.OK, MessageBoxImage.Error)
         End Try
-    End Sub
+    End Function
 
     Private Sub Camera_CameraError(sender As Object, message As String) Handles _camera.CameraError
         _log.LogAdd("カメラエラー: " & message, _log.ERR)
@@ -231,7 +237,7 @@ Class MainWindow
         Dim audioPath = Path.Combine(_recordingFolderPath, _tempAudioFile)
         Dim outputPath = Path.Combine(_recordingFolderPath, _outputFile)
 
-        Task.Run(Sub()
+        Task.Run(Async Function()
                      Try
                          System.Threading.Thread.Sleep(1000) ' ファイルが完全に書き込まれるまで待機
 
@@ -249,16 +255,15 @@ Class MainWindow
                      End Try
 
                      ' UI更新はDispatcher経由
-                     Dispatcher.Invoke(Sub()
-                                           System.Threading.Thread.Sleep(500)
-                                           カメラ起動()
-                                           If _現在_選択競技会FullName <> "" AndAlso _現在_選択区分NO <> "" AndAlso _現在_選択ラウンドNO <> "" Then
-                                               ファイルボタン作成(_現在_選択競技会FullName, _現在_選択区分NO, _現在_選択ラウンドNO)
-                                           Else
-                                               再生リスト更新()
-                                           End If
-                                       End Sub)
-                 End Sub)
+                     Await Dispatcher.InvokeAsync(Async Function()
+                                                      Await カメラ起動Async()
+                                                      If _現在_選択競技会FullName <> "" AndAlso _現在_選択区分NO <> "" AndAlso _現在_選択ラウンドNO <> "" Then
+                                                          ファイルボタン作成(_現在_選択競技会FullName, _現在_選択区分NO, _現在_選択ラウンドNO)
+                                                      Else
+                                                          再生リスト更新()
+                                                      End If
+                                                  End Function)
+                 End Function)
     End Sub
 
     Private Sub PB_録画開始_Click(sender As Object, e As RoutedEventArgs) Handles PB_録画開始.Click

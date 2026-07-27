@@ -3,6 +3,7 @@ Imports System.Windows
 Imports System.Windows.Media
 Imports System.Windows.Media.Imaging
 Imports System.Windows.Threading
+Imports System.Threading.Tasks
 Imports OpenCvSharp
 Imports OpenCvSharp.Extensions
 
@@ -36,46 +37,60 @@ Public Class CameraCapture
 
     '====== イベント ======
     Public Event CameraError(sender As Object, message As String)
+    Public Event CameraStarted(sender As Object, e As EventArgs)
 
     '====== コンストラクタ ======
     Public Sub New(cameraIndex As Integer)
         _cameraIndex = cameraIndex
     End Sub
 
-    ''' <summary>カメラを開始しWPF Imageコントロールに表示する</summary>
-    Public Function Start(frameBuffer As System.Windows.Controls.Image) As Boolean
+    ''' <summary>
+    ''' カメラを非同期で起動しWPF Imageコントロールに表示する。
+    ''' カメラ初期化はバックグラウンドスレッドで行い、UIスレッドをブロックしない。
+    ''' </summary>
+    Public Async Function StartAsync(frameBuffer As System.Windows.Controls.Image) As Task(Of Boolean)
         _frameImage = frameBuffer
         Try
-            ' バックエンドを順に試行: MSMF → DSHOW → ANY
-            Dim backends() As VideoCaptureAPIs = {
-                VideoCaptureAPIs.MSMF,
-                VideoCaptureAPIs.DSHOW,
-                VideoCaptureAPIs.ANY
-            }
+            ' ---- バックグラウンドでカメラ初期化 ----
+            Dim vcap As VideoCapture = Nothing
+            Dim actualW As Integer = _frameWidth
+            Dim actualH As Integer = _frameHeight
+            Dim actualFps As Integer = _fps
 
-            For Each backend In backends
-                Try
-                    _vcap = New VideoCapture(_cameraIndex, backend)
-                    System.Threading.Thread.Sleep(500)
-                    If _vcap.IsOpened() Then
-                        ' 実際にフレームが読めるか確認
-                        Using testFrame As New Mat()
-                            If _vcap.Read(testFrame) AndAlso Not testFrame.Empty() Then
-                                Exit For  ' 成功
-                            End If
-                        End Using
-                    End If
-                    _vcap.Dispose()
-                    _vcap = Nothing
-                Catch
-                    If _vcap IsNot Nothing Then _vcap.Dispose() : _vcap = Nothing
-                End Try
-            Next
+            Dim success As Boolean = Await Task.Run(Function()
+                ' バックエンドを順に試行: MSMF → DSHOW → ANY
+                Dim backends() As VideoCaptureAPIs = {
+                    VideoCaptureAPIs.MSMF,
+                    VideoCaptureAPIs.DSHOW,
+                    VideoCaptureAPIs.ANY
+                }
+                For Each backend In backends
+                    Try
+                        Dim v As New VideoCapture(_cameraIndex, backend)
+                        ' カメラデバイスの初期化待ち（バックグラウンドなのでSleepしてOK）
+                        System.Threading.Thread.Sleep(500)
+                        If v.IsOpened() Then
+                            Using testFrame As New Mat()
+                                If v.Read(testFrame) AndAlso Not testFrame.Empty() Then
+                                    vcap = v
+                                    Return True  ' 成功
+                                End If
+                            End Using
+                        End If
+                        v.Dispose()
+                    Catch
+                    End Try
+                Next
+                Return False
+            End Function)
 
-            If _vcap Is Nothing OrElse Not _vcap.IsOpened() Then
+            If Not success OrElse vcap Is Nothing Then
                 RaiseEvent CameraError(Me, "カメラ番号 " & _cameraIndex & " をオープンできませんでした。")
                 Return False
             End If
+
+            ' ---- 以降はUIスレッドで実行 ----
+            _vcap = vcap
 
             ' 解像度・FPS 設定
             _vcap.Set(VideoCaptureProperties.FrameWidth, _frameWidth)
@@ -85,20 +100,25 @@ Public Class CameraCapture
             ' 実際に取得できた解像度を反映
             _frameWidth = CInt(_vcap.Get(VideoCaptureProperties.FrameWidth))
             _frameHeight = CInt(_vcap.Get(VideoCaptureProperties.FrameHeight))
-            Dim actualFps As Double = _vcap.Get(VideoCaptureProperties.Fps)
-            If actualFps > 0 Then _fps = CInt(actualFps)
+            If _frameWidth <= 0 Then _frameWidth = 1280
+            If _frameHeight <= 0 Then _frameHeight = 720
 
-            ' WriteableBitmap 初期化
+            Dim fps As Double = _vcap.Get(VideoCaptureProperties.Fps)
+            If fps > 0 AndAlso fps <= 120 Then _fps = CInt(fps)
+
+            ' WriteableBitmap 初期化（UIスレッドで作成）
             _writeableBitmap = New WriteableBitmap(
                 _frameWidth, _frameHeight, 96, 96, PixelFormats.Bgr24, Nothing)
             _frameImage.Source = _writeableBitmap
 
             ' 取得タイマー開始
-            _captureTimer = New DispatcherTimer()
+            _captureTimer = New DispatcherTimer(DispatcherPriority.Render)
             _captureTimer.Interval = TimeSpan.FromMilliseconds(1000.0 / _fps)
             AddHandler _captureTimer.Tick, AddressOf OnCaptureTick
             _captureTimer.Start()
             _isRunning = True
+
+            RaiseEvent CameraStarted(Me, EventArgs.Empty)
             Return True
 
         Catch ex As Exception
@@ -115,21 +135,41 @@ Public Class CameraCapture
             Using mat As New Mat()
                 If Not _vcap.Read(mat) OrElse mat.Empty() Then Exit Sub
 
-                ' BGR24 バイト配列に変換
-                Dim stride As Integer = mat.Width * 3
-                Dim frameData(mat.Width * mat.Height * 3 - 1) As Byte
-                Marshal.Copy(mat.Data, frameData, 0, frameData.Length)
+                ' BGR24 に変換（カメラによって異なるフォーマットに対応）
+                Dim bgrMat As Mat
+                If mat.Type() = MatType.CV_8UC3 Then
+                    bgrMat = mat  ' すでにBGR24
+                ElseIf mat.Type() = MatType.CV_8UC4 Then
+                    ' BGRA → BGR
+                    bgrMat = New Mat()
+                    Cv2.CvtColor(mat, bgrMat, ColorConversionCodes.BGRA2BGR)
+                ElseIf mat.Type() = MatType.CV_8UC1 Then
+                    ' グレースケール → BGR
+                    bgrMat = New Mat()
+                    Cv2.CvtColor(mat, bgrMat, ColorConversionCodes.GRAY2BGR)
+                Else
+                    ' その他: そのまま使用
+                    bgrMat = mat
+                End If
 
-                ' WriteableBitmap に書き込む (GDI 不使用)
-                _writeableBitmap.Lock()
-                Try
-                    _writeableBitmap.WritePixels(
-                        New Int32Rect(0, 0, mat.Width, mat.Height),
-                        frameData, stride, 0)
-                    _writeableBitmap.AddDirtyRect(New Int32Rect(0, 0, mat.Width, mat.Height))
-                Finally
-                    _writeableBitmap.Unlock()
-                End Try
+                Dim w As Integer = bgrMat.Width
+                Dim h As Integer = bgrMat.Height
+                If w <= 0 OrElse h <= 0 Then Exit Sub
+
+                Dim stride As Integer = w * 3
+                Dim frameData(stride * h - 1) As Byte
+                Marshal.Copy(bgrMat.Data, frameData, 0, frameData.Length)
+
+                If Not Object.ReferenceEquals(bgrMat, mat) Then bgrMat.Dispose()
+
+                ' WriteableBitmapのサイズが変わっていたら再作成
+                If _writeableBitmap.PixelWidth <> w OrElse _writeableBitmap.PixelHeight <> h Then
+                    _writeableBitmap = New WriteableBitmap(w, h, 96, 96, PixelFormats.Bgr24, Nothing)
+                    _frameImage.Source = _writeableBitmap
+                End If
+
+                ' WriteableBitmap に書き込む（WritePixels は Lock/Unlock 不要）
+                _writeableBitmap.WritePixels(New Int32Rect(0, 0, w, h), frameData, stride, 0)
 
                 ' 録画中は ffmpeg にフレームを送る
                 If _isRecording AndAlso _ffmpegStream IsNot Nothing Then
