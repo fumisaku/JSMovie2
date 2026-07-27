@@ -231,7 +231,7 @@ Class MainWindow
         StartカウントUP()
 
         ' Recording表示
-        Dispatcher.Invoke(Sub() Me.LB_Status.Visibility = Visibility.Collapsed)
+        Me.LB_Status.Visibility = Visibility.Collapsed
     End Sub
 
     Private Sub 録画終了()
@@ -251,7 +251,7 @@ Class MainWindow
 
         ' タイマー停止
         Stopタイマー()
-        Dispatcher.Invoke(Sub() Me.LB_Status.Visibility = Visibility.Hidden)
+        Me.LB_Status.Visibility = Visibility.Hidden
 
         ' ffmpegで映像と音声を合成（非同期）
         Dim videoPath = Path.Combine(_recordingFolderPath, _tempVideoFile)
@@ -288,6 +288,7 @@ Class MainWindow
     End Sub
 
     Private Sub PB_録画開始_Click(sender As Object, e As RoutedEventArgs) Handles PB_録画開始.Click
+        _log.LogAdd($"録画ボタン押下: _録画中FLAG={_録画中FLAG}, ボタン={PB_録画開始.Content}", _log.ERR)
         If Not _録画中FLAG Then
             録画スタート("", "")
         Else
@@ -349,7 +350,7 @@ Class MainWindow
         _timer録画表示 = New DispatcherTimer()
         AddHandler _timer録画表示.Tick, New EventHandler(AddressOf timer表示_Tick)
         _TimerStatus = "N"
-        Dispatcher.Invoke(_timerDelegate, New Object() {"00:00", System.Windows.Media.Brushes.Cyan})
+        Timer更新("00:00", System.Windows.Media.Brushes.Cyan)
         _timer録画表示.Interval = New TimeSpan(0, 0, 1)
         _timer録画表示.Start()
     End Sub
@@ -357,12 +358,12 @@ Class MainWindow
     Private Sub StartカウントUP()
         _timer録画表示.Start()
         _TimerStartTime = DateTime.Now
-        Dispatcher.Invoke(_timerDelegate, New Object() {"00:00", System.Windows.Media.Brushes.Aqua})
+        Timer更新("00:00", System.Windows.Media.Brushes.Aqua)
         _TimerStatus = "R"
     End Sub
 
     Private Sub Stopタイマー()
-        Dispatcher.Invoke(_timerDelegate, New Object() {"00:00", System.Windows.Media.Brushes.Cyan})
+        Timer更新("00:00", System.Windows.Media.Brushes.Cyan)
         _TimerStatus = "N"
     End Sub
 
@@ -375,7 +376,7 @@ Class MainWindow
         If _TimerStatus = "R" Then
             Dim diff = DateTime.Now - _TimerStartTime
             Dim diff2 = Format(diff.Minutes, "00") & ":" & Format(diff.Seconds, "00")
-            Dispatcher.Invoke(_timerDelegate, New Object() {"R " & diff2, System.Windows.Media.Brushes.PeachPuff})
+            Timer更新("R " & diff2, System.Windows.Media.Brushes.PeachPuff)
         End If
     End Sub
 
