@@ -49,29 +49,15 @@ Public Class F_Index
         Dim fullpath As String = System.IO.Path.Combine(filepath, Filename)
         If Not System.IO.File.Exists(fullpath) Then Exit Sub
 
-        ' detectEncodingFromByteOrderMarks=True でBOMがあればUTF-8、なければShift-JISにフォールバック
-        Dim cReader As New System.IO.StreamReader(fullpath, System.Text.Encoding.GetEncoding("shift_jis"), True)
-        Dim lines As New System.Collections.Generic.List(Of String)
+        ' UTF-8（BOM有無どちらでも対応）で読み込む
+        Dim cReader As New System.IO.StreamReader(fullpath, System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks:=True)
         While cReader.Peek() >= 0
-            lines.Add(cReader.ReadLine())
-        End While
-        cReader.Close()
-
-        ' UTF-8で書き直す（次回以降はUTF-8で読める）
-        Try
-            Dim sw As New System.IO.StreamWriter(fullpath, False, System.Text.Encoding.UTF8)
-            For Each line In lines
-                sw.WriteLine(line)
-            Next
-            sw.Close()
-        Catch
-        End Try
-
-        For Each stBuffer In lines
-            If Not stBuffer.StartsWith("FileName") Then
+            Dim stBuffer As String = cReader.ReadLine()
+            If stBuffer <> "" AndAlso Not stBuffer.StartsWith("FileName") Then
                 Addデータ(stBuffer)
             End If
-        Next
+        End While
+        cReader.Close()
     End Sub
 
     Private Function カンマ区切り(fd As FD_ファイル詳細) As String
