@@ -238,7 +238,7 @@ Public Class CameraCapture
         Try
             Dim args As String = String.Format(
                 "-y -f rawvideo -pix_fmt bgr24 -s {0}x{1} -r {2} -i pipe:0 " &
-                "-c:v libx264 -preset fast -crf 23 ""{3}""",
+                "-c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p ""{3}""",
                 _frameWidth, _frameHeight, _fps, outputVideoPath)
 
             RaiseEvent CameraError(Me, $"ffmpeg起動: {ffmpegExe} {args}")
