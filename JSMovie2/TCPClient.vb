@@ -86,8 +86,17 @@ Public Class TCPClient
         Me.receivedBytes.Write(receiveBuffer, 0, len)
 
         If Me.receivedBytes.Length > _maxReceiveLength Then
-            Parm.LOG.LogAdd("最大受信長を超えました。", Parm.LOG.ERR)
-            Me.Close()
+            ' 最大受信長を超えた場合はバッファを捨てて受信を継続する（接続は維持）
+            ' KANS_MU_Progress 等の大きな電文を受け取っても通信が切れないようにする
+            Parm.LOG.LogAdd("最大受信長を超えたためバッファをリセットします。受信長=" & Me.receivedBytes.Length, Parm.LOG.WARNING)
+            Me.receivedBytes.Close()
+            Me.receivedBytes = New System.IO.MemoryStream()
+            ' 次の受信を継続
+            SyncLock Me
+                Me._socket.BeginReceive(receiveBuffer, 0, receiveBuffer.Length,
+                    SocketFlags.None,
+                    New AsyncCallback(AddressOf ReceiveDataCallback), receiveBuffer)
+            End SyncLock
             Return
         End If
 
