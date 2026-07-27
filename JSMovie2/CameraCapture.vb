@@ -241,8 +241,6 @@ Public Class CameraCapture
                 "-c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p ""{3}""",
                 _frameWidth, _frameHeight, _fps, outputVideoPath)
 
-            RaiseEvent CameraError(Me, $"ffmpeg起動: {ffmpegExe} {args}")
-
             Dim psi As New System.Diagnostics.ProcessStartInfo(ffmpegExe, args)
             psi.UseShellExecute = False
             psi.RedirectStandardInput = True
@@ -252,17 +250,14 @@ Public Class CameraCapture
 
             _ffmpegProcess = System.Diagnostics.Process.Start(psi)
             If _ffmpegProcess Is Nothing Then
-                RaiseEvent CameraError(Me, "ffmpegプロセス起動失敗（Process.Start が Nothing を返した）")
+                RaiseEvent CameraError(Me, "ffmpegプロセス起動失敗")
                 Return False
             End If
 
-            ' stderrを読み捨て（デッドロック防止）
+            ' stderrを読み捨て（バッファあふれによるデッドロック防止）
             System.Threading.Tasks.Task.Run(Sub()
                 Try
-                    Dim errOut = _ffmpegProcess.StandardError.ReadToEnd()
-                    If errOut.Length > 0 Then
-                        RaiseEvent CameraError(Me, "ffmpeg stderr: " & errOut.Substring(0, Math.Min(200, errOut.Length)))
-                    End If
+                    _ffmpegProcess.StandardError.ReadToEnd()
                 Catch
                 End Try
             End Sub)
@@ -271,7 +266,7 @@ Public Class CameraCapture
             _isRecording = True
             Return True
         Catch ex As Exception
-            RaiseEvent CameraError(Me, "録画開始エラー: " & ex.Message & " / " & ex.GetType().Name)
+            RaiseEvent CameraError(Me, "録画開始エラー: " & ex.Message)
             Return False
         End Try
     End Function

@@ -162,10 +162,6 @@ Class MainWindow
 
     Private Sub Camera_CameraError(sender As Object, message As String) Handles _camera.CameraError
         _log.LogAdd("カメラエラー: " & message, _log.ERR)
-        ' 録画関連のメッセージはヘッダーにも表示
-        If message.StartsWith("ffmpeg") OrElse message.StartsWith("録画") Then
-            Dispatcher.InvokeAsync(Sub() Me.LB_Hedder.Content = message)
-        End If
     End Sub
 
     '======================================================
@@ -190,20 +186,8 @@ Class MainWindow
             End If
         End If
 
-        _log.LogAdd("録画スタート: folder=" & _recordingFolderPath, _log.ERR)
-
         If Not Directory.Exists(_recordingFolderPath) Then
-            Try
-                Directory.CreateDirectory(_recordingFolderPath)
-                _log.LogAdd("フォルダ作成: " & _recordingFolderPath, _log.ERR)
-            Catch ex As Exception
-                _log.LogAdd("フォルダ作成失敗: " & ex.Message, _log.ERR)
-                MessageBox.Show("録画フォルダを作成できません:" & vbCrLf & _recordingFolderPath & vbCrLf & ex.Message,
-                                "録画エラー", MessageBoxButton.OK, MessageBoxImage.Error)
-                _録画中FLAG = False
-                PB_録画開始.Content = "録画開始"
-                Return
-            End Try
+            Directory.CreateDirectory(_recordingFolderPath)
         End If
 
         If _outputFile = "" Then
@@ -211,15 +195,10 @@ Class MainWindow
             _outputFile = "Movie_" & 連番 & ".mp4"
         End If
 
-        _log.LogAdd("出力ファイル: " & _outputFile, _log.ERR)
-
         ' ffmpegへのパイプで映像録画開始
         Dim videoTempPath As String = Path.Combine(_recordingFolderPath, _tempVideoFile)
         If _camera IsNot Nothing Then
-            Dim ok As Boolean = _camera.StartRecording(videoTempPath)
-            _log.LogAdd("映像録画開始: " & ok.ToString() & " path=" & videoTempPath, _log.ERR)
-        Else
-            _log.LogAdd("録画失敗: _camera is Nothing", _log.ERR)
+            _camera.StartRecording(videoTempPath)
         End If
 
         ' 音声録音開始 (NAudio 2.x)
@@ -288,7 +267,6 @@ Class MainWindow
     End Sub
 
     Private Sub PB_録画開始_Click(sender As Object, e As RoutedEventArgs) Handles PB_録画開始.Click
-        _log.LogAdd($"録画ボタン押下: _録画中FLAG={_録画中FLAG}, ボタン={PB_録画開始.Content}", _log.ERR)
         If Not _録画中FLAG Then
             録画スタート("", "")
         Else
